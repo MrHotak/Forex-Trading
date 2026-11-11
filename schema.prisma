@@ -1,0 +1,201 @@
+// Forex Trading Journal - PostgreSQL schema (Neon)
+// DATABASE_URL = pooled connection (runtime), DIRECT_URL = direct connection (migrations)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum Direction {
+  BUY
+  SELL
+}
+
+enum TradingSession {
+  ASIAN
+  LONDON
+  NEW_YORK
+  SYDNEY
+}
+
+enum TradeResult {
+  WIN
+  LOSS
+  BREAK_EVEN
+}
+
+enum Language {
+  en
+  fa
+}
+
+enum Theme {
+  dark
+  light
+}
+
+model User {
+  id                String        @id @default(uuid()) @db.Uuid
+  fullName          String        @map("full_name") @db.VarChar(120)
+  email             String        @unique @db.VarChar(254)
+  username          String        @unique @db.VarChar(40)
+  passwordHash      String        @map("password_hash")
+  role              Role          @default(USER)
+  status            AccountStatus @default(ACTIVE)
+  passwordChangedAt DateTime?     @map("password_changed_at") @db.Timestamptz(6)
+  lastLoginAt       DateTime?     @map("last_login_at") @db.Timestamptz(6)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  settings     UserSettings?
+  trades       Trade[]
+  attachments  TradeAttachment[]
+  activityLogs ActivityLog[]
+  resetTokens  PasswordResetToken[]
+
+  @@index([role])
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model UserSettings {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @unique @map("user_id") @db.Uuid
+  language        Language @default(en)
+  theme           Theme    @default(dark)
+  startingBalance Decimal  @default(0) @map("starting_balance") @db.Decimal(18, 2)
+  currency        String   @default("USD") @db.VarChar(3)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model Trade {
+  id              String         @id @default(uuid()) @db.Uuid
+  tradeNo         Int            @unique @default(autoincrement()) @map("trade_no")
+  userId          String         @map("user_id") @db.Uuid
+  tradeDate       DateTime       @map("trade_date") @db.Date
+  pair            String         @db.VarChar(20)
+  session         TradingSession
+  direction       Direction
+  entryPrice      Decimal        @map("entry_price") @db.Decimal(18, 6)
+  exitPrice       Decimal?       @map("exit_price") @db.Decimal(18, 6)
+  stopLoss        Decimal?       @map("stop_loss") @db.Decimal(18, 6)
+  riskAmount      Decimal?       @map("risk_amount") @db.Decimal(18, 2)
+  riskPercent     Decimal?       @map("risk_percent") @db.Decimal(7, 3)
+  balanceBefore   Decimal?       @map("balance_before") @db.Decimal(18, 2)
+  balanceAfter    Decimal?       @map("balance_after") @db.Decimal(18, 2)
+  reasonForEntry  String?        @map("reason_for_entry") @db.Text
+  emotion         String?        @db.VarChar(200)
+  reasonForExit   String?        @map("reason_for_exit") @db.Text
+  rrAchieved      Decimal?       @map("rr_achieved") @db.Decimal(10, 2)
+  lessonsLearned  String?        @map("lessons_learned") @db.Text
+  mistakes        String?        @db.Text
+  profitLoss      Decimal        @default(0) @map("profit_loss") @db.Decimal(18, 2)
+  result          TradeResult
+  lotSize         Decimal?       @map("lot_size") @db.Decimal(12, 4)
+  commission      Decimal        @default(0) @db.Decimal(18, 2)
+  swap            Decimal        @default(0) @db.Decimal(18, 2)
+  strategy        String?        @db.VarChar(100)
+  setup           String?        @db.VarChar(100)
+  entryTime       String?        @map("entry_time") @db.VarChar(5)
+  exitTime        String?        @map("exit_time") @db.VarChar(5)
+  notes           String?        @db.Text
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Trades are never removed automatically: deleting a user row is blocked while trades exist.
+  user        User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  attachments TradeAttachment[]
+
+  @@index([userId, tradeDate])
+  @@index([userId, pair])
+  @@index([userId, result])
+  @@index([userId, session])
+  @@map("trades")
+}
+
+model TradeAttachment {
+  id        String   @id @default(uuid()) @db.Uuid
+  tradeId   String   @map("trade_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  fileName  String   @map("file_name") @db.VarChar(255)
+  mimeType  String   @map("mime_type") @db.VarChar(100)
+  sizeBytes Int      @map("size_bytes")
+  data      Bytes
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  trade Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([tradeId])
+  @@index([userId])
+  @@map("trade_attachments")
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @db.VarChar(60)
+  entity    String?  @db.VarChar(40)
+  entityId  String?  @map("entity_id") @db.VarChar(64)
+  ip        String?  @db.VarChar(64)
+  userAgent String?  @map("user_agent") @db.VarChar(255)
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([action])
+  @@map("activity_logs")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+// Platform-wide settings managed from the Admin Panel (key/value).
+model AppSetting {
+  key       String   @id @db.VarChar(60)
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("app_settings")
+}
